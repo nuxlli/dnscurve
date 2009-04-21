@@ -1,7 +1,7 @@
 import struct
 from util import xor
 
-__all__ = ['stream_salsa20', 'stream_salsa20_xor']
+__all__ = ['core_hsalsa20', 'stream_salsa20', 'stream_salsa20_xor', 'stream_xsalsa20', 'stream_xsalsa20_xor']
 
 def rotate(x, n):
   x &= 0xffffffff
@@ -32,32 +32,54 @@ def doubleround(s):
   columnround(s)
   rowround(s)
 
-def rounds(s, n):
+def rounds(s, n, add=True):
   s1 = list(s)
   while n >= 2:
     doubleround(s1)
     n -= 2
-  for i in range(16): s[i] = (s[i] + s1[i]) & 0xffffffff
+  if add:
+    for i in range(16): s[i] = (s[i] + s1[i]) & 0xffffffff
 
 o = struct.unpack('<4I', 'expand 32-byte k')
 
-def block(i, n, k):
-  i = (i & 0xffffffff, i >> 32)
+def block(n, k):
   s = [0] * 16
   s[::5] = o
   s[1:5] = k[:4]
-  s[6:10] = n + i
+  s[6:10] = n
   s[11:15] = k[4:]
   rounds(s, 20)
   return struct.pack('<16I', *s)
+
+def hblock(n, k):
+  s = [0] * 16
+  s[::5] = o
+  s[1:5] = k[:4]
+  s[6:10] = n
+  s[11:15] = k[4:]
+  rounds(s, 20, False)
+  return struct.pack('<8I', *(s[::5] + s[6:10]))
+
+def core_hsalsa20(n, k):
+  n = struct.unpack('<4I', n)
+  k = struct.unpack('<8I', k)
+  return hblock(n, k)
 
 def stream_salsa20(l, n, k):
   output = []
   n = struct.unpack('<2I', n)
   k = struct.unpack('<8I', k)
-  for i in xrange(0, l, 64):
-    output.append(block(i // 64, n, k))
+  n = list(n) + [0, 0]
+  for i in xrange(0, (l + 63) / 64):
+    n[2], n[3] = i & 0xffffffff, i >> 32
+    output.append(block(n, k))
   return ''.join(output)[:l]
 
 def stream_salsa20_xor(m, n, k):
   return xor(m, stream_salsa20(len(m), n, k))
+
+def stream_xsalsa20(l, n, k):
+  return stream_salsa20(l, n[16:], core_hsalsa20(n[:16], k))
+
+def stream_xsalsa20_xor(m, n, k):
+  return xor(m, stream_xsalsa20_xor(len(m), n, k))

@@ -1,4 +1,4 @@
-import random
+__all__ = ['xor', 'randombytes']
 
 def xor(s, t):
   output = []

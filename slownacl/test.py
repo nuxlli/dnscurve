@@ -41,6 +41,8 @@ def check(its, name, arglens):
 if __name__ == '__main__':
   check(1024, 'hash_sha512', [(1, 100)])
   check(1024, 'auth_hmacsha512', [(1, 100), 32])
+  check(1024, 'onetimeauth_poly1305', [(1, 100), 32])
   check(256, 'smult_curve25519_base', [32])
   check(128, 'stream_salsa20_xor', [(0, 1024), 8, 32])
+  check(128, 'stream_xsalsa20_xor', [(0, 1024), 24, 32])
   check(64, 'smult_curve25519', [32, 32])
