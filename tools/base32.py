@@ -1,6 +1,6 @@
-def encode(s):
-  k = '0123456789abcdefghijklmnopqrstuv'
+digits = '0123456789bcdfghjklmnpqrstuvwxyz'
 
+def encode(s):
   v = 0
   vbits = 0
   output = []
@@ -10,12 +10,12 @@ def encode(s):
     vbits += 8
 
     while vbits >= 5:
-      output.append(k[v & 31])
+      output.append(digits[v & 31])
       v >>= 5
       vbits -= 5
 
   if vbits:
-    output.append(k[v])
+    output.append(digits[v])
 
   return ''.join(output)
 
@@ -26,13 +26,10 @@ def decode(s):
   output = []
 
   for c in s.lower():
-    if c >= '0' and c <= '9':
-      u = ord(c) - ord('0')
-    elif c >= 'a' and c <= 'v':
-      u = ord(c) - ord('a') + 10
-    else:
+    try:
+      u = digits.index(c)
+    except ValueError:
       raise ValueError('Invalid base-32 input')
-
     v |= u << vbits
     vbits += 5
 
