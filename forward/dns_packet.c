@@ -121,18 +121,43 @@ dns_curve_name_parse(uint8_t *box, unsigned *boxlen,
 // qnamelen: (output) set to contain the number of bytes of query name
 // buffer: the packet contents
 // n: number of bytes in @buffer
-// returns: 1 on success, 0 if this doesn't appear to be a DNS curve packet and
-//   -1 if the DNS curve packet is invalid
+// returns: 1 on success if TXT format, 2 on success if streamlined format,
+// 0 if this doesn't appear to be a DNS curve packet and -1 if the DNS
+// curve packet is invalid
 // -----------------------------------------------------------------------------
 int
 dns_curve_request_parse(uint8_t *plaintext, unsigned *plaintextlen,
                         uint8_t *public_key, uint8_t *nonce,
                         const uint8_t **qname, unsigned *qnamelen,
                         const uint8_t *buffer, unsigned n) {
-  // The DNSCurve format is quite strict. This is an absolute minimum number
-  // of bytes
-  if (n < 17)
+  uint8_t fullnonce[24];
+  uint8_t nonce_and_box[4096];
+  unsigned nonce_and_box_len = sizeof(nonce_and_box);
+
+  // A streamlined formatted DNSCurve packet will be at least 68
+  // bytes, while TXT formatted packets will be even longer.
+  if (n < 68)
     return 0;
+
+  // Check for a streamlined packet.
+  if (!memcmp(buffer, "Q6fnvWj8", 8)) {
+    memcpy(public_key, buffer + 8, 32);
+    memcpy(fullnonce, buffer + 40, 12);
+    memset(fullnonce + 12, 0, 12);
+    memset(nonce_and_box, 0, 16);
+    memcpy(nonce_and_box + 16, buffer + 52, n - 52);
+    nonce_and_box_len = n - 36;
+
+    if (-1 == crypto_box_curve25519xsalsa20poly1305_open
+        (nonce_and_box, nonce_and_box, nonce_and_box_len, fullnonce,
+         public_key, global_secret_key))
+      return 0; // Not a valid DNSCurve packet, but might be a valid DNS query.
+
+    memcpy(nonce, fullnonce, 12);
+    memcpy(plaintext, nonce_and_box + 32, nonce_and_box_len - 32);
+    *plaintextlen = nonce_and_box_len - 32;
+    return 2;
+  }
 
   // First two bytes are the client selected transaction id
   uint16_t transid;
@@ -164,9 +189,7 @@ dns_curve_request_parse(uint8_t *plaintext, unsigned *plaintextlen,
                            "\x00\x01", 4)) // internet class
     return 0;
 
-  uint8_t fullnonce[24];
-  uint8_t nonce_and_box[4096];
-  unsigned server_zone, nonce_and_box_len = sizeof(nonce_and_box);
+  unsigned server_zone;
 
   /* skip the first 4 bytes so the box is already in place */
   nonce_and_box_len -= 4;

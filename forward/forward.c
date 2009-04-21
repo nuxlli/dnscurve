@@ -45,7 +45,7 @@ struct txidentry {
   uint16_t source_txid;
   uint16_t target_txid;
 
-  char is_dnscurve;
+  uint8_t is_dnscurve; /* 0 is not, 1 is TXT, 2 is streamlined */
 
   // The following are only valid if @is_dnscurve is non-zero
   uint8_t public_key[32];
@@ -231,7 +231,7 @@ dns_transmit(const uint8_t *packet, unsigned len, unsigned extra) {
 static void
 dns_forward(const uint8_t *packet, unsigned length, int efd,
             const struct sockaddr_in *sin, uint16_t txid,
-            char is_dnscurve,
+            uint8_t is_dnscurve,
             const uint8_t *public_key, const uint8_t *nonce,
             const uint8_t *qname, unsigned qnamelen) {
   if (length < 16)
@@ -329,59 +329,70 @@ dns_reply(uint8_t *packet, unsigned length, struct txidentry *entry) {
   crypto_box_curve25519xsalsa20poly1305
     (nonce_and_box, packet - 32, length + 32, nonce,
      entry->public_key, global_secret_key);
-  memcpy(nonce_and_box + 4, nonce + 12, 12);
-
-  const unsigned payload_length = 12 + 16 + length;
 
   unsigned pos = 0;
-  if (!buffer_append(wrapper, sizeof(wrapper), &pos, &entry->source_txid, 2))
-    return;
-  if (!buffer_append(wrapper, sizeof(wrapper), &pos,
-                     "\x84"  // response, opcode 0, authoritative,
-                             // not truncated, recursion not desired
-                     "\x00"  // recursion not available, no Z bits, RCODE 0
-                     "\x00\x01"   // one question
-                     "\x00\x01"  // one answer
-                     "\x00\x00"  // no authority
-                     "\x00\x00", // no additional
-                     10))
-    return;
-  if (!buffer_append(wrapper, sizeof(wrapper), &pos,
-                     entry->qname, entry->qnamelen))
-    return;
-  if (!buffer_append(wrapper, sizeof(wrapper), &pos,
-                     "\x00\x10"  // query type TXT
-                     "\x00\x01"  // Internet class
-                     "\xc0\x0c"  // pointer back to the first qname
-                     "\x00\x10"  // TXT reply
-                     "\x00\x01"  // Internet class
-                     "\x00\x00\x00\x00",  // TTL 0
-                     14))
-    return;
 
-  // The DNS RDATA is a series of charactor strings, which are 8-bit length
-  // prefixed strings. Thus we need to split the nonce_and_box into parts, at
-  // most 255 bytes long.
-  const unsigned rdatalen = payload_length + (payload_length + 254) / 255;
-  const uint16_t rdatalen_be = htons(rdatalen);
+  if (entry->is_dnscurve == 2) {
+    if (!buffer_append(wrapper, sizeof(wrapper), &pos, "R6fnvWJ8", 8))
+      return;
+    if (!buffer_append(wrapper, sizeof(wrapper), &pos, nonce, 24))
+      return;
+    if (!buffer_append(wrapper, sizeof(wrapper), &pos, nonce_and_box + 16, length + 16))
+      return;
+  } else {
+    memcpy(nonce_and_box + 4, nonce + 12, 12);
 
-  if (!buffer_append(wrapper, sizeof(wrapper), &pos, &rdatalen_be, 2))
-    return;
+    const unsigned payload_length = 12 + 16 + length;
 
-  unsigned todo = payload_length, i = 4;
-  while (todo) {
-    unsigned stringlen = todo;
-    if (stringlen > 255) stringlen = 255;
-    const uint8_t strlenbyte = stringlen;
-
-    if (!buffer_append(wrapper, sizeof(wrapper), &pos, &strlenbyte, 1))
+    if (!buffer_append(wrapper, sizeof(wrapper), &pos, &entry->source_txid, 2))
+      return;
+    if (!buffer_append(wrapper, sizeof(wrapper), &pos,
+                       "\x84"  // response, opcode 0, authoritative,
+                               // not truncated, recursion not desired
+                       "\x00"  // recursion not available, no Z bits, RCODE 0
+                       "\x00\x01"   // one question
+                       "\x00\x01"  // one answer
+                       "\x00\x00"  // no authority
+                       "\x00\x00", // no additional
+                       10))
+      return;
+    if (!buffer_append(wrapper, sizeof(wrapper), &pos,
+                       entry->qname, entry->qnamelen))
+      return;
+    if (!buffer_append(wrapper, sizeof(wrapper), &pos,
+                       "\x00\x10"  // query type TXT
+                       "\x00\x01"  // Internet class
+                       "\xc0\x0c"  // pointer back to the first qname
+                       "\x00\x10"  // TXT reply
+                       "\x00\x01"  // Internet class
+                       "\x00\x00\x00\x00",  // TTL 0
+                       14))
       return;
 
-    if (!buffer_append(wrapper, sizeof(wrapper), &pos, nonce_and_box + i, stringlen))
+    // The DNS RDATA is a series of charactor strings, which are 8-bit length
+    // prefixed strings. Thus we need to split the nonce_and_box into parts, at
+    // most 255 bytes long.
+    const unsigned rdatalen = payload_length + (payload_length + 254) / 255;
+    const uint16_t rdatalen_be = htons(rdatalen);
+
+    if (!buffer_append(wrapper, sizeof(wrapper), &pos, &rdatalen_be, 2))
       return;
 
-    todo -= stringlen;
-    i += stringlen;
+    unsigned todo = payload_length, i = 4;
+    while (todo) {
+      unsigned stringlen = todo;
+      if (stringlen > 255) stringlen = 255;
+      const uint8_t strlenbyte = stringlen;
+
+      if (!buffer_append(wrapper, sizeof(wrapper), &pos, &strlenbyte, 1))
+        return;
+
+      if (!buffer_append(wrapper, sizeof(wrapper), &pos, nonce_and_box + i, stringlen))
+        return;
+
+      todo -= stringlen;
+      i += stringlen;
+    }
   }
 
   ssize_t n;
@@ -467,7 +478,7 @@ curve_worker() {
           // invalid DNS curve packet. Drop
         } else {
           // valid DNS curve packet, inner packet in plaintext
-          dns_forward(plaintext, plaintextlen, efd, &sin, txid, 1, public_key,
+          dns_forward(plaintext, plaintextlen, efd, &sin, txid, cr, public_key,
                       nonce, qname, qnamelen);
         }
       } else {
