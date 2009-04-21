@@ -35,7 +35,7 @@ def doubleround(s):
 def rounds(s, n, add=True):
   s1 = list(s)
   while n >= 2:
-    doubleround(s1)
+    doubleround(s)
     n -= 2
   if add:
     for i in range(16): s[i] = (s[i] + s1[i]) & 0xffffffff
