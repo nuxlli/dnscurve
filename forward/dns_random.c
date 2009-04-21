@@ -1,6 +1,6 @@
 #include <stdint.h>
 
-#include <nacl/randombytes.h>
+#include "randombytes.h"
 
 static uint32_t seed[32];
 static uint32_t in[12];

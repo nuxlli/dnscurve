@@ -2,7 +2,7 @@
 #include <errno.h>
 #include <string.h>
 
-#include <nacl/crypto_box_curve25519salsa20hmacsha512.h>
+#include "crypto_box_curve25519xsalsa20poly1305.h"
 
 #include "dns.h"
 #include "base32.h"
@@ -116,7 +116,7 @@ dns_curve_name_parse(uint8_t *box, unsigned *boxlen,
 // plaintext: (output) a 4096 byte buffer which receives the enclosed packet
 // plaintextlen: (output) on success, the length of the data in @plaintext
 // public_key: (output) the client's public key (32-bytes)
-// nonce: (output) the client's nonce (8-bytes)
+// nonce: (output) the client's nonce (12-bytes)
 // qname: (output) set to point within @buffer to the start of the query name
 // qnamelen: (output) set to contain the number of bytes of query name
 // buffer: the packet contents
@@ -164,25 +164,34 @@ dns_curve_request_parse(uint8_t *plaintext, unsigned *plaintextlen,
                            "\x00\x01", 4)) // internet class
     return 0;
 
+  uint8_t fullnonce[24];
   uint8_t nonce_and_box[4096];
   unsigned server_zone, nonce_and_box_len = sizeof(nonce_and_box);
-  if (!dns_curve_name_parse(nonce_and_box, &nonce_and_box_len,
+
+  /* skip the first 4 bytes so the box is already in place */
+  nonce_and_box_len -= 4;
+  if (!dns_curve_name_parse(nonce_and_box + 4, &nonce_and_box_len,
                             public_key, &server_zone, queryname))
     return 0;
+  nonce_and_box_len += 4;
 
-  if (nonce_and_box_len < 8 + crypto_box_curve25519salsa20hmacsha512_ref_AUTHBYTES)
+  if (nonce_and_box_len < 32)
+    return 0;
+  if (*plaintextlen < nonce_and_box_len - 32)
     return 0;
 
-  if (*plaintextlen < (nonce_and_box_len - 8) + crypto_box_curve25519salsa20hmacsha512_EXTRABYTES)
-    return 0;
+  memcpy(fullnonce, nonce_and_box + 4, 12);
+  memset(fullnonce + 12, 0, 12);
+  memset(nonce_and_box, 0, 16);
 
-  if (-1 == crypto_box_curve25519salsa20hmacsha512_open
-      (plaintext, nonce_and_box + 8, nonce_and_box_len - 8,
-       nonce_and_box, public_key, global_secret_key))
+  if (-1 == crypto_box_curve25519xsalsa20poly1305_open
+      (nonce_and_box, nonce_and_box, nonce_and_box_len, fullnonce,
+       public_key, global_secret_key))
     return -1;
 
-  memcpy(nonce, nonce_and_box, 8);
-  *plaintextlen = nonce_and_box_len - 8 - crypto_box_curve25519salsa20hmacsha512_AUTHBYTES;
+  memcpy(nonce, fullnonce, 12);
+  memcpy(plaintext, nonce_and_box + 32, nonce_and_box_len - 32);
+  *plaintextlen = nonce_and_box_len - 32;
 
   return 1;
 }

@@ -13,7 +13,7 @@
 
 #include <fcntl.h>
 
-#include <nacl/crypto_box_curve25519salsa20hmacsha512.h>
+#include "crypto_box_curve25519xsalsa20poly1305.h"
 
 #include "base32.h"
 
@@ -29,7 +29,7 @@ main() {
   }
 
   uint8_t public[32], private[32];
-  crypto_box_curve25519salsa20hmacsha512_keypair(public, private);
+  crypto_box_curve25519xsalsa20poly1305_keypair(public, private);
 
   uint8_t dnspublic[64];
   unsigned dnspublic_len = sizeof(dnspublic) - 3;
@@ -40,17 +40,25 @@ main() {
     return 1;
   }
   dnspublic[54] = 0;
-  printf("Public key: %s\n", dnspublic);
+  printf("DNS public key: %s\n", dnspublic);
 
-  char hexprivate[65];
   static const char hextable[] = "0123456789abcdef";
 
+  char hexpublic[65];
+  for (unsigned i = 0; i < 32; ++i) {
+    hexpublic[i*2    ] = hextable[public[i] >> 4];
+    hexpublic[i*2 + 1] = hextable[public[i] & 15];
+  }
+  hexpublic[64] = 0;
+  printf("Hex public key: %s\n", hexpublic);
+
+  char hexprivate[65];
   for (unsigned i = 0; i < 32; ++i) {
     hexprivate[i*2    ] = hextable[private[i] >> 4];
     hexprivate[i*2 + 1] = hextable[private[i] & 15];
   }
   hexprivate[64] = 0;
-  printf("Private key: %s\n", hexprivate);
+  printf("Hex secret key: %s\n", hexprivate);
 
   return 0;
 }

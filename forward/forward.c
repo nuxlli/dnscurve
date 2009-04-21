@@ -13,8 +13,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#include <nacl/crypto_box_curve25519salsa20hmacsha512.h>
-#include <nacl/randombytes.h>
+#include "crypto_box_curve25519xsalsa20poly1305.h"
+#include "randombytes.h"
 
 #include "dns.h"
 #include "ip_parse.h"
@@ -49,7 +49,7 @@ struct txidentry {
 
   // The following are only valid if @is_dnscurve is non-zero
   uint8_t public_key[32];
-  uint8_t nonce[8];
+  uint8_t nonce[12];
   uint16_t qnamelen;                  // length of the client's query name
   uint8_t qname[0];                    // query name follows directly
 };
@@ -97,6 +97,21 @@ time_now() {
   msecs += ts.tv_nsec / 1000000;
 
   return msecs;
+}
+
+// -----------------------------------------------------------------------------
+// Create a 12-byte DNSCurve nonce
+// -----------------------------------------------------------------------------
+static void
+dns_nonce(uint8_t nonce[12])
+{
+  static uint64_t x = 0; /* XXX: use nanoseconds since 1970 */
+  unsigned i;
+
+  ++x;
+  memcpy(nonce, &x, 8);
+  for (i = 8; i < 12; ++i)
+    nonce[i] = dns_random(256);
 }
 
 // -----------------------------------------------------------------------------
@@ -209,7 +224,7 @@ dns_transmit(const uint8_t *packet, unsigned len, unsigned extra) {
 // sin: source location
 // is_dnscurve: true iff the source packet was DNS curve protected
 // public_key: (if @is_dnscurve) the client's public key (32 bytes)
-// nonce: (if @is_dnscurve) the client's nonce (8 bytes)
+// nonce: (if @is_dnscurve) the client's nonce (12 bytes)
 // qname: (if @is_dnscurve) the original query string
 // qnamelen: (if @is_dnscurve) number of bytes in @qname
 // -----------------------------------------------------------------------------
@@ -229,7 +244,7 @@ dns_forward(const uint8_t *packet, unsigned length, int efd,
   entry->is_dnscurve = is_dnscurve;
   if (is_dnscurve) {
     memcpy(entry->public_key, public_key, 32);
-    memcpy(entry->nonce, nonce, 8);
+    memcpy(entry->nonce, nonce, 12);
     entry->qnamelen = qnamelen;
     memcpy(entry->qname, qname, qnamelen);
   }
@@ -262,7 +277,7 @@ dns_forward(const uint8_t *packet, unsigned length, int efd,
 // -----------------------------------------------------------------------------
 // Pass a reply back to the requestor
 //
-// packet: the reply from the backend server. 8 free bytes are available preceeding
+// packet: the reply from the backend server. 32 free bytes are available preceeding
 //   this buffer
 // length: number of bytes in @packet
 // entry: the txidentry for this request
@@ -300,22 +315,23 @@ dns_reply(uint8_t *packet, unsigned length, struct txidentry *entry) {
 
   // client is DNS curve. Need to construct a wrapping
 
+  uint8_t nonce[24];
   uint8_t wrapper[4096];
   uint8_t nonce_and_box[4096];
-  randombytes(nonce_and_box, 8);
 
-  if (8 + length + crypto_box_curve25519salsa20hmacsha512_AUTHBYTES +
-      crypto_box_curve25519salsa20hmacsha512_EXTRABYTES >
-      sizeof(nonce_and_box) - 8)
+  if (32 + length > sizeof(nonce_and_box))
     return;
 
-  memcpy(packet - 8, entry->nonce, 8);
+  memcpy(nonce, entry->nonce, 12);
+  dns_nonce(nonce + 12);
+  memset(packet - 32, 0, 32);
 
-  crypto_box_curve25519salsa20hmacsha512(nonce_and_box + 8, packet - 8, length + 8,
-                                         nonce_and_box, entry->public_key,
-                                         global_secret_key);
-  const unsigned payload_length =
-    length + 8 + 8 + crypto_box_curve25519salsa20hmacsha512_AUTHBYTES;
+  crypto_box_curve25519xsalsa20poly1305
+    (nonce_and_box, packet - 32, length + 32, nonce,
+     entry->public_key, global_secret_key);
+  memcpy(nonce_and_box + 4, nonce + 12, 12);
+
+  const unsigned payload_length = 12 + 16 + length;
 
   unsigned pos = 0;
   if (!buffer_append(wrapper, sizeof(wrapper), &pos, &entry->source_txid, 2))
@@ -352,7 +368,7 @@ dns_reply(uint8_t *packet, unsigned length, struct txidentry *entry) {
   if (!buffer_append(wrapper, sizeof(wrapper), &pos, &rdatalen_be, 2))
     return;
 
-  unsigned todo = payload_length, i = 0;
+  unsigned todo = payload_length, i = 4;
   while (todo) {
     unsigned stringlen = todo;
     if (stringlen > 255) stringlen = 255;
@@ -417,7 +433,7 @@ curve_worker() {
     ssize_t n;
     const uint8_t *qname;
     unsigned qnamelen;
-    uint8_t public_key[32], nonce[8];
+    uint8_t public_key[32], nonce[12];
 
     for (unsigned i = 0; i < r; ++i) {
       if (events[i].data.ptr == NULL) {
@@ -460,7 +476,7 @@ curve_worker() {
 
         sinlen = sizeof(sin);
         do {
-          n = recvfrom(entry->fd, buffer + 8, sizeof(buffer) - 8, MSG_DONTWAIT,
+          n = recvfrom(entry->fd, buffer + 32, sizeof(buffer) - 32, MSG_DONTWAIT,
                        (struct sockaddr *) &sin, &sinlen);
         } while (n == -1 && errno == EINTR);
 
@@ -472,10 +488,10 @@ curve_worker() {
         if (sin.sin_addr.s_addr != global_target_address ||
             sin.sin_port != htons(53) ||
             n < 2 ||
-            *((uint16_t *) (buffer + 8)) != entry->target_txid)
+            *((uint16_t *) (buffer + 32)) != entry->target_txid)
           continue;  // bogus packet
 
-        dns_reply(buffer + 8, n, entry);
+        dns_reply(buffer + 32, n, entry);
 
         close(entry->fd);
         free(entry);
