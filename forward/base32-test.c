@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include <stdint.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "base32.h"
 
@@ -8,7 +10,7 @@ main(int argc, char **argv) {
   uint8_t a[128];
   unsigned alen = sizeof(a);
 
-  if (!base32_encode(a, &alen, argv[1], strlen(argv[1]))) {
+  if (!base32_encode(a, &alen, (unsigned char *) argv[1], strlen(argv[1]))) {
     perror("encode");
     return 1;
   }
@@ -19,7 +21,7 @@ main(int argc, char **argv) {
   uint8_t b[128];
   unsigned blen = sizeof(b);
 
-  if (!base32_decode(b, &blen, a, alen)) {
+  if (!base32_decode(b, &blen, a, alen, 0)) {
     perror("decode");
     return 1;
   }

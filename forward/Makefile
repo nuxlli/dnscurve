@@ -1,5 +1,5 @@
 CFLAGS=-Wall -ggdb -std=c99
-TARGETS=forward udpserver dnscurve-keygen dnscurve-test-client
+TARGETS=forward udpserver dnscurve-keygen dnscurve-test-client base32-test
 
 targets: $(TARGETS)
 
@@ -18,11 +18,17 @@ udpserver: udpserver.o ip_parse.o
 dnscurve-keygen: dnscurve-keygen.o base32.o randombytes.o
 	gcc $(CFLAGS) -o dnscurve-keygen dnscurve-keygen.o base32.o randombytes.o -lnacl
 
+base32-test: base32-test.o base32.o
+	gcc $(CFLAGS) -o base32-test base32-test.o base32.o
+
 forward.o: forward.c dns.h
 	gcc $(CFLAGS) -c forward.c
 
 dns_packet.o: dns_packet.c base32.h dns.h
 	gcc $(CFLAGS) -c dns_packet.c
+
+base32-test.o: base32-test.c base32.h
+	gcc $(CFLAGS) -c base32-test.c
 
 base32.o: base32.c base32.h
 	gcc $(CFLAGS) -c base32.c

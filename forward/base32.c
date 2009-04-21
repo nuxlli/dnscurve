@@ -4,9 +4,9 @@
 static const uint8_t kValues[] =
   {99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,
     99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,0,1,
-    2,3,4,5,6,7,8,9,99,99,99,99,99,99,99,10,11,12,13,14,15,16,17,18,19,20,21,
-    22,23,24,25,26,27,28,29,30,31,99,99,99,99,99,99,99,99,99,99,10,11,12,13,14,
-    15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,99,99,99,99,99,99,99,99,99};
+    2,3,4,5,6,7,8,9,99,99,99,99,99,99,99,99,10,11,12,99,13,14,15,99,16,17,18,
+    19,20,99,21,22,23,24,25,26,27,28,29,30,31,99,99,99,99,99,99,99,10,11,12,99,
+    13,14,15,99,16,17,18,19,20,99,21,22,23,24,25,26,27,28,29,30,31,99,99,99,99,99};
 
 int
 base32_decode(uint8_t *output, unsigned *ooutlen,
@@ -35,10 +35,13 @@ base32_decode(uint8_t *output, unsigned *ooutlen,
   }
 
   if (mode) {
-    if (bits && i >= outlen)
-      goto TOOBIG;
-    output[i++] = v & ((1 << bits) - 1);
-  }
+    if (bits) {
+      if (i >= outlen)
+        goto TOOBIG;
+      output[i++] = v;
+    }
+  } else if (bits >= 5 || v)
+    goto PROTO;
 
   *ooutlen = i;
   return 1;
@@ -57,7 +60,7 @@ base32_encode(uint8_t *output, unsigned *ooutlen, const uint8_t *in, unsigned in
   unsigned i = 0, j = 0;
   unsigned v = 0, bits = 0;
   const unsigned outlen = *ooutlen;
-  static const char kChars[] = "0123456789abcdefghijklmnopqrstuv";
+  static const char kChars[] = "0123456789bcdfghjklmnpqrstuvwxyz";
 
   while (j < inlen) {
     v |= ((unsigned) in[j++]) << bits;
@@ -72,9 +75,13 @@ base32_encode(uint8_t *output, unsigned *ooutlen, const uint8_t *in, unsigned in
     }
   }
 
-  if (bits && i >= outlen)
-    goto TOOBIG;
-  output[i++] = kChars[v];
+  if (bits) {
+    if (i >= outlen)
+      goto TOOBIG;
+    output[i++] = kChars[v & 31];
+    bits -= 5;
+    v >>= 5;
+  }
 
   *ooutlen = i;
 
