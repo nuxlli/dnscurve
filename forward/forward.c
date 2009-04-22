@@ -580,9 +580,5 @@ main(int argc, char **argv) {
     return 1;
   }
 
-  global_secret_key[0] &= 248;
-  global_secret_key[31] &= 127;
-  global_secret_key[31] |= 64;
-
   return curve_worker();
 }
