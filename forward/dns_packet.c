@@ -89,9 +89,9 @@ dns_curve_name_parse(uint8_t *box, unsigned *boxlen,
 
   // Next is the public key
   if (!(name[i] == 54 &&
-        name[i+1] == 'x' &&
+        (name[i+1] & ~0x20) == 'X' &&
         name[i+2] == '1' &&
-        name[i+3] == 'a'))
+        (name[i+3] & ~0x20) == 'A'))
     return 0;
 
   unsigned publickeylen = 32;
