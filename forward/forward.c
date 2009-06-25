@@ -13,7 +13,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#include "crypto_box_curve25519xsalsa20poly1305.h"
+#include <nacl/crypto_box_curve25519xsalsa20poly1305.h>
 #include "randombytes.h"
 
 #include "dns.h"

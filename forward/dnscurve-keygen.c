@@ -13,7 +13,7 @@
 
 #include <fcntl.h>
 
-#include "crypto_box_curve25519xsalsa20poly1305.h"
+#include <nacl/crypto_box_curve25519xsalsa20poly1305.h>
 
 #include "base32.h"
 
