@@ -1,0 +1,6 @@
+*/*.o
+forward/forward
+forward/udpserver
+forward/dnscurve-keygen
+forward/dnscurve-test-client
+forward/base32-test
